@@ -268,6 +268,30 @@
     .ctrl-btn.active { border-color: var(--accent); background: #0a2030; color: var(--accent); }
     .ctrl-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
 
+    #route-panel, #utility-panel {
+      flex: 0 0 auto;
+      max-height: 48%;
+      overflow-y: auto;
+      border-top: 1px solid var(--border);
+      padding: 8px 12px;
+      font-size: 12px;
+    }
+    #route-panel summary, #utility-panel summary { cursor: pointer; color: var(--accent); }
+    #route-panel label, #route-panel input, #route-panel select { display: block; }
+    #route-panel label, #route-panel .ctrl-row, #route-status { margin-top: 6px; }
+    #route-panel input, #route-panel select { width: 100%; margin-top: 3px; }
+    #route-panel select { color: var(--text); background: var(--panel); }
+    #route-time, #route-status { overflow-wrap: anywhere; }
+    #route-status:empty { display: none; }
+    .utility-row { margin-top: 8px; }
+    .utility-row label { display: block; }
+    .utility-row input[type="file"] { width: 100%; margin-top: 3px; }
+    .utility-row input[type="checkbox"] { accent-color: currentColor; }
+    .utility-bombeo { color: #56d8ff; }
+    .utility-electricidad { color: #ffda58; }
+    .utility-status { overflow-wrap: anywhere; }
+    .utility-status:not(:empty) { margin-top: 3px; }
+
     /* ── OPACITY SLIDER ── */
     .model-opacity-row {
       display: none;
@@ -480,6 +504,40 @@
     <div class="sidebar-section">Modelos en escena</div>
     <div id="model-list"></div>
 
+    <details id="utility-panel" name="visor-capas">
+      <summary>Bombeo y electricidad</summary>
+      <div class="utility-row">
+        <label class="utility-bombeo"><input type="checkbox" id="utility-bombeo" disabled /> Mostrar bombeo</label>
+        <label for="utility-bombeo-file">JSON de bombeo</label>
+        <input type="file" id="utility-bombeo-file" accept=".json,application/json" disabled />
+        <p id="utility-bombeo-status" class="utility-status" role="status"></p>
+      </div>
+      <div class="utility-row">
+        <label class="utility-electricidad"><input type="checkbox" id="utility-electricidad" disabled /> Mostrar electricidad</label>
+        <label for="utility-electricidad-file">JSON de electricidad</label>
+        <input type="file" id="utility-electricidad-file" accept=".json,application/json" disabled />
+        <p id="utility-electricidad-status" class="utility-status" role="status"></p>
+      </div>
+    </details>
+
+    <details id="route-panel" name="visor-capas">
+      <summary>Rutas de vehículos</summary>
+      <label for="route-file">CSV de posiciones de la zona</label>
+      <input type="file" id="route-file" accept=".csv,text/csv" disabled />
+      <p id="route-status" role="status"></p>
+      <div id="route-controls" hidden>
+        <label for="route-vehicle">Vehículo</label>
+        <select id="route-vehicle"></select>
+        <label for="route-timeline">Tiempo transcurrido <output id="route-time"></output></label>
+        <input type="range" id="route-timeline" min="0" value="0" step="any" />
+        <div class="ctrl-row">
+          <button type="button" class="ctrl-btn" id="route-play">Reproducir</button>
+          <button type="button" class="ctrl-btn" id="route-restart">Reiniciar</button>
+          <button type="button" class="ctrl-btn" id="route-clear">Quitar</button>
+        </div>
+      </div>
+    </details>
+
     <div id="sidebar-controls">
       <!-- Fila 1: Etiquetas + Medidor -->
       <div class="ctrl-row">
@@ -547,7 +605,13 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegmentsGeometry.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineMaterial.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegments2.js"></script>
+<script type="module">
+import { createRoutePlayback } from './route-playback.js';
+import { createUtilityLayers } from './utility-layers.js';
+
 (function () {
   'use strict';
 
@@ -602,11 +666,10 @@
   function resize() {
     const w = container.clientWidth, h = container.clientHeight;
     renderer.setSize(w, h, false);
+    utilityLayers.setViewport(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }
-  resize();
-  window.addEventListener('resize', resize);
 
   /* ═══════════════════════════════════════════════
      STATE
@@ -624,6 +687,12 @@
   let labelsOn = false;
   let baseDist = 800; // updated after fit
   let sceneGroup = new THREE.Group(); scene.add(sceneGroup);
+  const cadToScene = new THREE.Matrix4().makeRotationX(THREE.MathUtils.degToRad(-90));
+  const routePlayback = createRoutePlayback(THREE, sceneGroup, cadToScene, PALETTE);
+  const utilityLayers = createUtilityLayers(THREE, sceneGroup, cadToScene);
+  resize();
+  window.addEventListener('resize', resize);
+  let zoneLoad = 0;
 
   /* ═══════════════════════════════════════════════
      ZONES — read from URL or discover
@@ -680,6 +749,7 @@
         zones.push({
           name,
           path,
+          servicios: j.servicios,
           models: modelNames.map(mn => ({
             name: mn,
             path: path + mn,
@@ -753,10 +823,13 @@
   ═══════════════════════════════════════════════ */
   async function loadZone(idx) {
     if (idx === activeZoneIdx) return;
+    const load = ++zoneLoad;
     activeZoneIdx = idx;
     const zone = zones[idx];
     zoneLabelEl.textContent = zone.name;
 
+    routePlayback.setOrigin(null);
+    utilityLayers.setZone(null);
     clearScene();
     renderZoneList();
     renderModelList();
@@ -771,6 +844,7 @@
       renderModelList();
       try {
         const buffer = await fetchSTL(model.path);
+        if (load !== zoneLoad) return;
         const geo = parseSTL(buffer);
         const mat = new THREE.MeshPhongMaterial({
           color: model.color,
@@ -788,6 +862,7 @@
         model.status = 'ok';
         model.triCount = geo.attributes.position.count / 3;
       } catch (e) {
+        if (load !== zoneLoad) return;
         model.status = 'error';
         model.errorMsg = e.message;
       }
@@ -798,13 +873,16 @@
     });
 
     await Promise.all(promises);
+    if (load !== zoneLoad) return;
 
     // Reset group rotation before computing bounding box — otherwise Box3 is skewed
     sceneGroup.rotation.set(0, 0, 0);
     sceneGroup.updateMatrixWorld(true);
 
     panX = 0; panY = 0; rotX = 0; rotY = 0; zoom = 1;
-    centerZoneAtOrigin(zone);
+    const origin = centerZoneAtOrigin(zone);
+    routePlayback.setOrigin(origin);
+    if (origin) utilityLayers.setZone(zone, origin);
     fitCamera();
     hideLoading();
     renderModelList();
@@ -821,7 +899,7 @@
     zone.models.forEach(m => {
       if (m.mesh) { box.expandByObject(m.mesh); hasAny = true; }
     });
-    if (!hasAny) return;
+    if (!hasAny) return null;
 
     const center = new THREE.Vector3();
     box.getCenter(center);
@@ -829,6 +907,7 @@
     zone.models.forEach(m => {
       if (m.mesh) m.mesh.position.sub(center);
     });
+    return center;
   }
 
   /* ═══════════════════════════════════════════════
@@ -986,7 +1065,7 @@
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
 
     // Rotate X −90° (CAD convention → Three.js Y-up)
-    geo.applyMatrix4(new THREE.Matrix4().makeRotationX(THREE.MathUtils.degToRad(-90)));
+    geo.applyMatrix4(cadToScene);
 
     return geo;
   }
@@ -1370,8 +1449,9 @@
     if (!labelsOn) { labelsOverlay.innerHTML = ''; _labelMap.clear(); }
   });
 
-  function animate() {
+  function animate(timestamp) {
     requestAnimationFrame(animate);
+    routePlayback.update(timestamp);
 
     sceneGroup.rotation.x = THREE.MathUtils.degToRad(rotX);
     sceneGroup.rotation.y = THREE.MathUtils.degToRad(rotY);
@@ -1399,7 +1479,7 @@
 
     updateLabels();
   }
-  animate();
+  requestAnimationFrame(animate);
 
   /* ═══════════════════════════════════════════════
      DEVICE DETECTION — compact sidebar on touch

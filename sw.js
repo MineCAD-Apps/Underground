@@ -1,11 +1,16 @@
-const CACHE = 'visor-mina-v2';
+const CACHE = 'visor-mina-v5';
 
 const PRECACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/zones.json',
-  'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js'
+  './',
+  './index.html',
+  './manifest.json',
+  './zones.json',
+  './route-playback.js',
+  './utility-layers.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
+  'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegmentsGeometry.js',
+  'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineMaterial.js',
+  'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegments2.js'
 ];
 
 self.addEventListener('install', event => {
