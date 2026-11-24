@@ -209,11 +209,15 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene, onVisibilityC
       }
       lastTimestamp = timestamp;
       camera.updateMatrixWorld(true);
-      const occupied = [];
+      const labelScale = window.matchMedia('(max-width: 600px), (pointer: coarse)').matches ? 0.6 : 1;
       const labels = layers.flatMap(layer => layer.labels.map(label => ({
         ...label, visible: layer.group.visible
       }))).sort((a, b) => b.prioridad - a.prioridad);
+      let rank = labels.length;
       for (const { element, position, horizontal, vertical, visible } of labels) {
+        element.style.zIndex = String(rank--);
+        element.style.transformOrigin = horizontal + '% ' + vertical + '%';
+        element.style.transform = 'translate(-' + horizontal + '%, -' + vertical + '%) scale(' + labelScale + ')';
         worldPoint.copy(position).applyMatrix4(sceneGroup.matrixWorld).project(camera);
         element.hidden = !visible || worldPoint.z < -1 || worldPoint.z > 1 ||
           Math.abs(worldPoint.x) > 1 || Math.abs(worldPoint.y) > 1;
@@ -222,21 +226,6 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene, onVisibilityC
 
         const x = (worldPoint.x + 1) * 0.5 * container.clientWidth;
         const y = (1 - worldPoint.y) * 0.5 * container.clientHeight;
-        const width = element.offsetWidth || 160;
-        const height = element.offsetHeight || 26;
-        const box = {
-          left: x - width * horizontal / 100,
-          top: y - height * vertical / 100
-        };
-        box.right = box.left + width;
-        box.bottom = box.top + height;
-        const overlaps = occupied.some(other =>
-          box.left <= other.right + 6 && box.right + 6 >= other.left &&
-          box.top <= other.bottom + 6 && box.bottom + 6 >= other.top);
-        element.hidden = overlaps;
-        element.style.display = overlaps ? 'none' : 'block';
-        if (overlaps) continue;
-        occupied.push(box);
         element.style.left = x + 'px';
         element.style.top = y + 'px';
       }
