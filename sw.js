@@ -1,4 +1,4 @@
-const CACHE = 'visor-mina-v6';
+const CACHE = 'visor-mina-v7';
 
 const PRECACHE = [
   './',
