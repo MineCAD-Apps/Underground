@@ -30,7 +30,8 @@ export function parseUtilityNetwork(text) {
   const etiquetas = sourceLabels.map((label, index) => {
     if (typeof label?.texto !== 'string' || !label.texto.trim() ||
         !Array.isArray(label.posicion) || label.posicion.length !== 3 ||
-        !label.posicion.every(Number.isFinite)) {
+        !label.posicion.every(Number.isFinite) ||
+        (label.prioridad !== undefined && !Number.isFinite(label.prioridad))) {
       throw new Error(`Etiqueta ${index + 1}: se requieren texto y posicion [X, Y, Z].`);
     }
     return label;
@@ -46,11 +47,16 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene, onVisibilityC
   const container = document.getElementById('canvas-container');
   const labelOverlay = document.createElement('div');
   labelOverlay.id = 'network-labels';
+  // Keep labels positioned even when an older HTML stylesheet is cached.
+  Object.assign(labelOverlay.style, {
+    position: 'absolute', inset: '0', pointerEvents: 'none', overflow: 'hidden', zIndex: '3'
+  });
   container.appendChild(labelOverlay);
   const coneAxis = new THREE.Vector3(0, 1, 0);
   const transform = new THREE.Object3D();
   const worldPoint = new THREE.Vector3();
   const cameraPoint = new THREE.Vector3();
+  const pathPoint = new THREE.Vector3();
   let viewportHeight = 1;
   let animationTime = 0;
   let lastTimestamp = null;
@@ -75,7 +81,7 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene, onVisibilityC
         toggle.setAttribute('aria-busy', 'true');
         status.textContent = 'Cargando ' + label.toLowerCase() + '…';
         try {
-          const response = await fetch(context.zone.path + key + '.json');
+          const response = await fetch(context.zone.path + key + '.json', { cache: 'no-store' });
           if (!response.ok) throw new Error(response.status === 404 ? 'Falta ' + key + '.json en la carpeta de esta mina.' : 'HTTP ' + response.status);
           const data = parseUtilityNetwork(await response.text());
           if (active !== context) return;
@@ -169,6 +175,12 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene, onVisibilityC
     for (const label of state.etiquetas) {
       const element = document.createElement('div');
       element.className = 'network-label';
+      Object.assign(element.style, {
+        position: 'absolute', padding: '4px 8px', border: '1px solid', borderRadius: '4px',
+        background: 'rgba(5, 14, 24, 0.94)', color: '#f3f8ff', fontSize: '13px',
+        lineHeight: '1.35', whiteSpace: 'pre', maxWidth: '300px', overflow: 'hidden',
+        textOverflow: 'ellipsis', boxShadow: '0 1px 6px #000'
+      });
       element.textContent = label.texto.replace(/%%d/gi, '°').replace(/%%p/gi, '±')
         .replace(/%%c/gi, '⌀').replace(/%%[uok]/gi, '');
       element.style.borderColor = '#' + layer.color.toString(16).padStart(6, '0');
@@ -176,9 +188,11 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene, onVisibilityC
       const vertical = label.alineacionV === 3 ? 0 : label.alineacionV === 2 || label.alineacionH === 4 ? 50 : 100;
       element.style.transform = `translate(-${horizontal}%, -${vertical}%)`;
       element.hidden = true;
+      element.style.display = 'none';
       labelOverlay.appendChild(element);
       layer.labels.push({
-        element, position: new THREE.Vector3(...label.posicion).applyMatrix4(cadToScene).sub(active.origin)
+        element, horizontal, vertical, prioridad: label.prioridad ?? 0,
+        position: new THREE.Vector3(...label.posicion).applyMatrix4(cadToScene).sub(active.origin)
       });
     }
   }
@@ -195,22 +209,49 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene, onVisibilityC
       }
       lastTimestamp = timestamp;
       camera.updateMatrixWorld(true);
+      const occupied = [];
+      const labels = layers.flatMap(layer => layer.labels.map(label => ({
+        ...label, visible: layer.group.visible
+      }))).sort((a, b) => b.prioridad - a.prioridad);
+      for (const { element, position, horizontal, vertical, visible } of labels) {
+        worldPoint.copy(position).applyMatrix4(sceneGroup.matrixWorld).project(camera);
+        element.hidden = !visible || worldPoint.z < -1 || worldPoint.z > 1 ||
+          Math.abs(worldPoint.x) > 1 || Math.abs(worldPoint.y) > 1;
+        element.style.display = element.hidden ? 'none' : 'block';
+        if (element.hidden) continue;
+
+        const x = (worldPoint.x + 1) * 0.5 * container.clientWidth;
+        const y = (1 - worldPoint.y) * 0.5 * container.clientHeight;
+        const width = element.offsetWidth || 160;
+        const height = element.offsetHeight || 26;
+        const box = {
+          left: x - width * horizontal / 100,
+          top: y - height * vertical / 100
+        };
+        box.right = box.left + width;
+        box.bottom = box.top + height;
+        const overlaps = occupied.some(other =>
+          box.left <= other.right + 6 && box.right + 6 >= other.left &&
+          box.top <= other.bottom + 6 && box.bottom + 6 >= other.top);
+        element.hidden = overlaps;
+        element.style.display = overlaps ? 'none' : 'block';
+        if (overlaps) continue;
+        occupied.push(box);
+        element.style.left = x + 'px';
+        element.style.top = y + 'px';
+      }
       for (const layer of layers) {
-        for (const { element, position } of layer.labels) {
-          worldPoint.copy(position).applyMatrix4(sceneGroup.matrixWorld).project(camera);
-          element.hidden = !layer.group.visible || worldPoint.z < -1 || worldPoint.z > 1 ||
-            Math.abs(worldPoint.x) > 1 || Math.abs(worldPoint.y) > 1;
-          if (!element.hidden) {
-            element.style.left = ((worldPoint.x + 1) * 0.5 * container.clientWidth) + 'px';
-            element.style.top = ((1 - worldPoint.y) * 0.5 * container.clientHeight) + 'px';
-          }
-        }
         if (!layer.group.visible || !layer.cones) continue;
         let index = 0;
         for (const path of layer.paths) {
-          for (let i = 0; i < path.count; i++) {
+          pathPoint.copy(path.segments[0].start).applyMatrix4(sceneGroup.matrixWorld).applyMatrix4(camera.matrixWorldInverse);
+          const pathViewHeight = camera.isOrthographicCamera ? (camera.top - camera.bottom) / camera.zoom :
+            2 * Math.max(camera.near, -pathPoint.z) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / camera.zoom;
+          // Keep cones apart at overview zoom, where overlapping cones can obscure their direction.
+          const visibleCount = Math.max(1, Math.min(path.count, Math.floor(path.length * viewportHeight / pathViewHeight / 60)));
+          for (let i = 0; i < visibleCount; i++) {
             const speed = Math.min(8, path.length / 5);
-            const distance = (i * path.length / path.count + animationTime * speed) % path.length;
+            const distance = (i * path.length / visibleCount + animationTime * speed) % path.length;
             let lower = 0;
             let upper = path.segments.length - 1;
             while (lower < upper) {
@@ -231,6 +272,7 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene, onVisibilityC
           }
         }
         layer.cones.instanceMatrix.needsUpdate = true;
+        layer.cones.count = index;
         layer.cones.visible = true;
       }
     },
