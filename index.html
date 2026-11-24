@@ -268,29 +268,15 @@
     .ctrl-btn.active { border-color: var(--accent); background: #0a2030; color: var(--accent); }
     .ctrl-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
 
-    #route-panel, #utility-panel {
-      flex: 0 0 auto;
-      max-height: 48%;
-      overflow-y: auto;
-      border-top: 1px solid var(--border);
-      padding: 8px 12px;
-      font-size: 12px;
-    }
-    #route-panel summary, #utility-panel summary { cursor: pointer; color: var(--accent); }
-    #route-panel label, #route-panel input, #route-panel select { display: block; }
-    #route-panel label, #route-panel .ctrl-row, #route-status { margin-top: 6px; }
-    #route-panel input, #route-panel select { width: 100%; margin-top: 3px; }
-    #route-panel select { color: var(--text); background: var(--panel); }
-    #route-time, #route-status { overflow-wrap: anywhere; }
-    #route-status:empty { display: none; }
-    .utility-row { margin-top: 8px; }
-    .utility-row label { display: block; }
-    .utility-row input[type="file"] { width: 100%; margin-top: 3px; }
-    .utility-row input[type="checkbox"] { accent-color: currentColor; }
-    .utility-bombeo { color: #56d8ff; }
-    .utility-electricidad { color: #ffda58; }
-    .utility-status { overflow-wrap: anywhere; }
-    .utility-status:not(:empty) { margin-top: 3px; }
+    #network-controls { padding: 10px; display: grid; gap: 6px; border-top: 1px solid var(--border); }
+    #network-status { font-size: 11px; overflow-wrap: anywhere; }
+    #network-status:empty { display: none; }
+    #utility-bombeo { --network-color: #fff34b; }
+    #utility-instalacion-electrica { --network-color: #ff70e8; }
+    #utility-rutas-acarreo { --network-color: #4dffb0; }
+    .network-btn.active { color: var(--network-color); border-color: var(--network-color); }
+    #pivot-marker { position: absolute; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 0 8px #00c2ff; }
+    #hud { max-width: calc(100% - 20px); white-space: normal; text-align: center; }
 
     /* ── OPACITY SLIDER ── */
     .model-opacity-row {
@@ -504,39 +490,12 @@
     <div class="sidebar-section">Modelos en escena</div>
     <div id="model-list"></div>
 
-    <details id="utility-panel" name="visor-capas">
-      <summary>Bombeo y electricidad</summary>
-      <div class="utility-row">
-        <label class="utility-bombeo"><input type="checkbox" id="utility-bombeo" disabled /> Mostrar bombeo</label>
-        <label for="utility-bombeo-file">JSON de bombeo</label>
-        <input type="file" id="utility-bombeo-file" accept=".json,application/json" disabled />
-        <p id="utility-bombeo-status" class="utility-status" role="status"></p>
-      </div>
-      <div class="utility-row">
-        <label class="utility-electricidad"><input type="checkbox" id="utility-electricidad" disabled /> Mostrar electricidad</label>
-        <label for="utility-electricidad-file">JSON de electricidad</label>
-        <input type="file" id="utility-electricidad-file" accept=".json,application/json" disabled />
-        <p id="utility-electricidad-status" class="utility-status" role="status"></p>
-      </div>
-    </details>
-
-    <details id="route-panel" name="visor-capas">
-      <summary>Rutas de vehículos</summary>
-      <label for="route-file">CSV de posiciones de la zona</label>
-      <input type="file" id="route-file" accept=".csv,text/csv" disabled />
-      <p id="route-status" role="status"></p>
-      <div id="route-controls" hidden>
-        <label for="route-vehicle">Vehículo</label>
-        <select id="route-vehicle"></select>
-        <label for="route-timeline">Tiempo transcurrido <output id="route-time"></output></label>
-        <input type="range" id="route-timeline" min="0" value="0" step="any" />
-        <div class="ctrl-row">
-          <button type="button" class="ctrl-btn" id="route-play">Reproducir</button>
-          <button type="button" class="ctrl-btn" id="route-restart">Reiniciar</button>
-          <button type="button" class="ctrl-btn" id="route-clear">Quitar</button>
-        </div>
-      </div>
-    </details>
+    <div id="network-controls" aria-label="Redes de mina">
+      <button class="ctrl-btn network-btn" id="utility-bombeo" type="button" aria-pressed="false">Bombeo</button>
+      <button class="ctrl-btn network-btn" id="utility-instalacion-electrica" type="button" aria-pressed="false">Instalación eléctrica</button>
+      <button class="ctrl-btn network-btn" id="utility-rutas-acarreo" type="button" aria-pressed="false">Rutas de acarreo</button>
+      <p id="network-status" role="status"></p>
+    </div>
 
     <div id="sidebar-controls">
       <!-- Fila 1: Etiquetas + Medidor -->
@@ -599,7 +558,7 @@
       triángulos: <span id="stat-tris">0</span>
     </div>
 
-    <div id="hud">Arrastra · Pellizca para zoom · Dos dedos para mover</div>
+    <div id="hud">Arrastra para girar · Rueda presionada o dos dedos para panear · Mantén pulsado para fijar pivote</div>
     <div id="labels-overlay"></div>
   </div>
 </div>
@@ -609,7 +568,6 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineMaterial.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegments2.js"></script>
 <script type="module">
-import { createRoutePlayback } from './route-playback.js';
 import { createUtilityLayers } from './utility-layers.js';
 
 (function () {
@@ -633,6 +591,7 @@ import { createUtilityLayers } from './utility-layers.js';
      DOM refs
   ═══════════════════════════════════════════════ */
   const container    = document.getElementById('canvas-container');
+  const sidebar      = document.getElementById('sidebar');
   const zoneListEl   = document.getElementById('zone-list');
   const modelListEl  = document.getElementById('model-list');
   const loadingEl    = document.getElementById('loading-overlay');
@@ -679,20 +638,49 @@ import { createUtilityLayers } from './utility-layers.js';
   let activeZoneIdx = -1;
 
   // interaction
-  let isDragging = false, prevX = 0, prevY = 0;
-  let rotX = 0, rotY = 0, panX = 0, panY = 0, zoom = 1;
-  let pinchDist0 = 0, pinchPanX0 = 0, pinchPanY0 = 0;
+  let rotX = 0, rotY = 0, panX = 0, panY = 0, panZ = 0, zoom = 1;
   let autoRotate = false;
   let wireframeOn = false;
   let labelsOn = false;
   let baseDist = 800; // updated after fit
   let sceneGroup = new THREE.Group(); scene.add(sceneGroup);
   const cadToScene = new THREE.Matrix4().makeRotationX(THREE.MathUtils.degToRad(-90));
-  const routePlayback = createRoutePlayback(THREE, sceneGroup, cadToScene, PALETTE);
-  const utilityLayers = createUtilityLayers(THREE, sceneGroup, cadToScene);
+  const utilityLayers = createUtilityLayers(THREE, sceneGroup, cadToScene, setNetworkView);
   resize();
   window.addEventListener('resize', resize);
   let zoneLoad = 0;
+  let networkView = false;
+  const pivotLocal = new THREE.Vector3();
+  const pivotWorld = new THREE.Vector3();
+  const rotatedPivot = new THREE.Vector3();
+  const pivotMarker = document.createElement('div');
+  pivotMarker.id = 'pivot-marker';
+  pivotMarker.hidden = true;
+  container.appendChild(pivotMarker);
+  let pivotMarkerUntil = 0;
+
+  function applyModelStyle(model) {
+    if (!model.mesh) return;
+    const material = model.mesh.material;
+    material.color.setHex(networkView ? 0x248bd1 : model.color);
+    material.opacity = networkView ? 0.18 : model.opacity;
+    material.depthWrite = !networkView;
+    if (!model.networkWire && networkView) {
+      model.networkWire = new THREE.Mesh(model.mesh.geometry, new THREE.MeshBasicMaterial({
+        color: 0x53b9ff, wireframe: true, transparent: true, opacity: 0.12,
+        depthWrite: false, side: THREE.DoubleSide
+      }));
+      model.networkWire.raycast = () => {};
+      model.mesh.add(model.networkWire);
+    }
+    if (model.networkWire) model.networkWire.visible = networkView;
+  }
+
+  function setNetworkView(enabled) {
+    networkView = enabled;
+    zones.forEach(zone => zone.models.forEach(applyModelStyle));
+  }
+
 
   /* ═══════════════════════════════════════════════
      ZONES — read from URL or discover
@@ -807,6 +795,7 @@ import { createUtilityLayers } from './utility-layers.js';
     zones.forEach(z => z.models.forEach(m => {
       if (m.mesh) {
         sceneGroup.remove(m.mesh);
+        if (m.networkWire) { m.networkWire.material.dispose(); m.networkWire = null; }
         m.mesh.geometry.dispose();
         m.mesh.material.dispose();
         m.mesh = null;
@@ -828,7 +817,11 @@ import { createUtilityLayers } from './utility-layers.js';
     const zone = zones[idx];
     zoneLabelEl.textContent = zone.name;
 
-    routePlayback.setOrigin(null);
+    cancelHold();
+    clearMeasure();
+    sceneGroup.position.set(0, 0, 0);
+    pivotLocal.set(0, 0, 0);
+    pivotWorld.set(0, 0, 0);
     utilityLayers.setZone(null);
     clearScene();
     renderZoneList();
@@ -859,6 +852,7 @@ import { createUtilityLayers } from './utility-layers.js';
         mesh.visible = model.visible;
         sceneGroup.add(mesh);
         model.mesh = mesh;
+        applyModelStyle(model);
         model.status = 'ok';
         model.triCount = geo.attributes.position.count / 3;
       } catch (e) {
@@ -881,7 +875,7 @@ import { createUtilityLayers } from './utility-layers.js';
 
     panX = 0; panY = 0; rotX = 0; rotY = 0; zoom = 1;
     const origin = centerZoneAtOrigin(zone);
-    routePlayback.setOrigin(origin);
+
     if (origin) utilityLayers.setZone(zone, origin);
     fitCamera();
     hideLoading();
@@ -987,7 +981,7 @@ import { createUtilityLayers } from './utility-layers.js';
           valLbl.textContent = slider.value + '%';
           slider.addEventListener('input', () => {
             model.opacity = slider.value / 100;
-            model.mesh.material.opacity = model.opacity;
+            applyModelStyle(model);
             valLbl.textContent = slider.value + '%';
           });
           opRow.appendChild(slider);
@@ -1074,6 +1068,13 @@ import { createUtilityLayers } from './utility-layers.js';
      FIT CAMERA to all visible meshes
   ═══════════════════════════════════════════════ */
   function fitCamera() {
+    sceneGroup.rotation.set(0, 0, 0);
+    sceneGroup.position.set(0, 0, 0);
+    pivotLocal.set(0, 0, 0);
+    pivotWorld.set(0, 0, 0);
+    pivotMarker.hidden = true;
+    pivotMarkerUntil = 0;
+    sceneGroup.updateMatrixWorld(true);
     const box = new THREE.Box3();
     let hasAny = false;
     zones.forEach(z => z.models.forEach(m => {
@@ -1091,7 +1092,7 @@ import { createUtilityLayers } from './utility-layers.js';
 
 
     // Reset pan/rot/zoom
-    rotX = 0; rotY = 0; panX = center.x; panY = center.y; zoom = 1;
+    rotX = 0; rotY = 0; panX = center.x; panY = center.y; panZ = center.z; zoom = 1;
     camera.position.set(
       center.x + baseDist * 0.6,
       center.y + baseDist * 0.4,
@@ -1119,75 +1120,120 @@ import { createUtilityLayers } from './utility-layers.js';
   /* ═══════════════════════════════════════════════
      CONTROLS
   ═══════════════════════════════════════════════ */
-  function dist2(a, b) {
-    return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+  const pointers = new Map();
+  let holdTimer = null;
+  let holdOrigin = null;
+  let heldPivot = false;
+  let gestureMoved = false;
+  let pinchDistance = 0;
+  let pinchCenter = null;
+
+  function cancelHold() {
+    clearTimeout(holdTimer);
+    holdTimer = null;
+    holdOrigin = null;
   }
 
-  container.addEventListener('touchstart', e => {
-    e.preventDefault();
+  function setPivotAt(clientX, clientY) {
+    const point = getRaycastPoint(clientX, clientY);
+    if (!point) return;
+    sceneGroup.updateMatrixWorld(true);
+    pivotWorld.copy(point).applyMatrix4(sceneGroup.matrixWorld);
+    pivotLocal.copy(point);
+    pivotMarkerUntil = performance.now() + 1800;
+    heldPivot = true;
+    if (navigator.vibrate) navigator.vibrate(30);
+  }
+
+  function startHold(event) {
+    cancelHold();
+    holdOrigin = { x: event.clientX, y: event.clientY };
+    holdTimer = setTimeout(() => {
+      if (measureOn) registerMeasurePoint(getRaycastPoint(event.clientX, event.clientY));
+      else setPivotAt(event.clientX, event.clientY);
+      heldPivot = true;
+      holdTimer = null;
+    }, 600);
+  }
+
+  function panView(dx, dy) {
+    const activeCamera = getActiveCamera();
+    activeCamera.updateMatrixWorld(true);
+    const d = baseDist / zoom;
+    const height = useOrtho ? d * 1.1 : 2 * camera.position.distanceTo(new THREE.Vector3(panX, panY, panZ)) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const scale = height / Math.max(1, container.clientHeight);
+    const move = new THREE.Vector3().setFromMatrixColumn(activeCamera.matrixWorld, 0).multiplyScalar(-dx * scale);
+    move.addScaledVector(new THREE.Vector3().setFromMatrixColumn(activeCamera.matrixWorld, 1), dy * scale);
+    panX += move.x; panY += move.y; panZ += move.z;
+  }
+
+  function pinchState() {
+    const [a, b] = [...pointers.values()];
+    return { distance: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  container.addEventListener('pointerdown', event => {
+    if (event.target !== renderer.domElement || ![0, 1].includes(event.button)) return;
+    event.preventDefault();
+    container.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, button: event.button });
     autoRotate = false;
     sidebar.classList.remove('open');
-    if (e.touches.length === 1) {
-      isDragging = true;
-      prevX = e.touches[0].clientX; prevY = e.touches[0].clientY;
-    } else if (e.touches.length === 2) {
-      isDragging = false;
-      pinchDist0 = dist2(e.touches[0], e.touches[1]);
-      pinchPanX0 = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      pinchPanY0 = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    heldPivot = false;
+    if (pointers.size === 1) {
+      gestureMoved = false;
+      if (event.button === 0) startHold(event);
+    } else {
+      cancelHold();
+      gestureMoved = true;
+      const pinch = pinchState();
+      pinchDistance = pinch.distance;
+      pinchCenter = pinch;
     }
-  }, { passive: false });
-
-  container.addEventListener('touchmove', e => {
-    e.preventDefault();
-    if (e.touches.length === 1 && isDragging) {
-      rotY += (e.touches[0].clientX - prevX) * 0.4;
-      rotX += (e.touches[0].clientY - prevY) * 0.4;
-      prevX = e.touches[0].clientX; prevY = e.touches[0].clientY;
-    } else if (e.touches.length === 2) {
-      const d = dist2(e.touches[0], e.touches[1]);
-      zoom *= d / pinchDist0;
-      zoom = Math.max(0.05, Math.min(20, zoom));
-      pinchDist0 = d;
-      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      panX -= (cx - pinchPanX0) * (baseDist / zoom) * 0.002;
-      panY += (cy - pinchPanY0) * (baseDist / zoom) * 0.002;
-      pinchPanX0 = cx; pinchPanY0 = cy;
+  });
+  container.addEventListener('pointermove', event => {
+    const previous = pointers.get(event.pointerId);
+    if (!previous) return;
+    const dx = event.clientX - previous.x;
+    const dy = event.clientY - previous.y;
+    if (holdOrigin && Math.hypot(event.clientX - holdOrigin.x, event.clientY - holdOrigin.y) > 8) {
+      gestureMoved = true;
+      cancelHold();
     }
-  }, { passive: false });
-
-  container.addEventListener('touchend', e => {
-    if (e.touches.length === 0) isDragging = false;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, button: previous.button });
+    if (pointers.size >= 2) {
+      const pinch = pinchState();
+      if (pinchDistance > 0 && pinch.distance > 0) zoom = Math.max(0.05, Math.min(20, zoom * pinch.distance / pinchDistance));
+      panView(pinch.x - pinchCenter.x, pinch.y - pinchCenter.y);
+      pinchDistance = pinch.distance;
+      pinchCenter = pinch;
+    } else if (previous.button === 1) {
+      panView(dx, dy);
+      gestureMoved = true;
+    } else if (!heldPivot) {
+      rotY += dx * 0.3;
+      rotX += dy * 0.3;
+    }
   });
-
-  container.addEventListener('mousedown', e => {
-    isDragging = true; autoRotate = false;
-    prevX = e.clientX; prevY = e.clientY;
-    sidebar.classList.remove('open');
-  });
-  container.addEventListener('mousemove', e => {
-    if (!isDragging) return;
-    rotY += (e.clientX - prevX) * 0.3;
-    rotX += (e.clientY - prevY) * 0.3;
-    prevX = e.clientX; prevY = e.clientY;
-  });
-  container.addEventListener('mouseup',    () => { isDragging = false; });
-  container.addEventListener('mouseleave', () => { isDragging = false; });
-  container.addEventListener('wheel', e => {
-    e.preventDefault();
-    zoom *= e.deltaY > 0 ? 0.9 : 1.1;
-    zoom = Math.max(0.05, Math.min(20, zoom));
+  function endPointer(event) {
+    cancelHold();
+    pointers.delete(event.pointerId);
+    if (pointers.size) gestureMoved = true;
+  }
+  container.addEventListener('pointerup', endPointer);
+  container.addEventListener('pointercancel', endPointer);
+  container.addEventListener('lostpointercapture', endPointer);
+  container.addEventListener('auxclick', event => { if (event.button === 1) event.preventDefault(); });
+  container.addEventListener('contextmenu', event => event.preventDefault());
+  container.addEventListener('wheel', event => {
+    event.preventDefault();
+    cancelHold();
+    zoom = Math.max(0.05, Math.min(20, zoom * (event.deltaY > 0 ? 0.9 : 1.1)));
     autoRotate = false;
   }, { passive: false });
-
-  /* Buttons */
+  window.addEventListener('blur', () => { pointers.clear(); cancelHold(); });
   document.getElementById('btn-reset').addEventListener('click', () => {
-    fitCamera(); autoRotate = false;
-  });
-
-  document.getElementById('btn-reset').addEventListener('click', () => {
-    fitCamera(); autoRotate = false;
+    cancelHold(); fitCamera(); autoRotate = false;
   });
 
   /* ── CAMERA TYPE ── */
@@ -1274,6 +1320,8 @@ import { createUtilityLayers } from './utility-layers.js';
     const rect = container.getBoundingClientRect();
     _mouse.x = ((clientX - rect.left) / rect.width)  *  2 - 1;
     _mouse.y = ((clientY - rect.top)  / rect.height) * -2 + 1;
+    sceneGroup.updateMatrixWorld(true);
+    getActiveCamera().updateMatrixWorld(true);
     _raycaster.setFromCamera(_mouse, getActiveCamera());
     const meshes = [];
     zones.forEach(z => z.models.forEach(m => { if (m.mesh && m.visible) meshes.push(m.mesh); }));
@@ -1308,41 +1356,10 @@ import { createUtilityLayers } from './utility-layers.js';
 
   // Click to place points (desktop)
   container.addEventListener('click', function(e) {
-    if (!measureOn) return;
+    if (!measureOn || gestureMoved || heldPivot || e.button !== 0) return;
     const pt = getRaycastPoint(e.clientX, e.clientY);
     registerMeasurePoint(pt);
   });
-
-  // Long press to place points (mobile)
-  let _lpTimer = null;
-  let _lpMoved = false;
-  let _lpOrigin = { x: 0, y: 0 };
-
-  container.addEventListener('touchstart', function(e) {
-    if (!measureOn || e.touches.length !== 1) return;
-    _lpMoved = false;
-    _lpOrigin = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    _lpTimer = setTimeout(() => {
-      if (!_lpMoved) {
-        const t = e.touches[0];
-        const pt = getRaycastPoint(t.clientX, t.clientY);
-        registerMeasurePoint(pt);
-        // Haptic feedback if available
-        if (navigator.vibrate) navigator.vibrate(40);
-      }
-    }, 500);
-  }, { passive: true });
-
-  container.addEventListener('touchmove', function(e) {
-    if (!_lpTimer) return;
-    const dx = e.touches[0].clientX - _lpOrigin.x;
-    const dy = e.touches[0].clientY - _lpOrigin.y;
-    if (Math.hypot(dx, dy) > 8) { _lpMoved = true; clearTimeout(_lpTimer); _lpTimer = null; }
-  }, { passive: true });
-
-  container.addEventListener('touchend', function() {
-    clearTimeout(_lpTimer); _lpTimer = null;
-  }, { passive: true });
 
   document.getElementById('btn-measure').addEventListener('click', function() {
     measureOn = !measureOn;
@@ -1451,19 +1468,21 @@ import { createUtilityLayers } from './utility-layers.js';
 
   function animate(timestamp) {
     requestAnimationFrame(animate);
-    routePlayback.update(timestamp);
+
 
     sceneGroup.rotation.x = THREE.MathUtils.degToRad(rotX);
     sceneGroup.rotation.y = THREE.MathUtils.degToRad(rotY);
+    rotatedPivot.copy(pivotLocal).applyEuler(sceneGroup.rotation);
+    sceneGroup.position.copy(pivotWorld).sub(rotatedPivot);
 
     const d = baseDist / zoom;
-    camera.position.set(panX + d * 0.6, panY + d * 0.4, d);
-    camera.lookAt(panX, panY, 0);
+    camera.position.set(panX + d * 0.6, panY + d * 0.4, panZ + d);
+    camera.lookAt(panX, panY, panZ);
 
     if (useOrtho && orthoCamera) {
       // Sync ortho camera to same position/orientation as perspective
       orthoCamera.position.copy(camera.position);
-      orthoCamera.lookAt(panX, panY, 0);
+      orthoCamera.lookAt(panX, panY, panZ);
       // Update ortho frustum size based on zoom
       const aspect = container.clientWidth / container.clientHeight;
       const size = d * 0.55;
@@ -1477,6 +1496,15 @@ import { createUtilityLayers } from './utility-layers.js';
       renderer.render(scene, camera);
     }
 
+    sceneGroup.updateMatrixWorld(true);
+    const showPivot = performance.now() < pivotMarkerUntil;
+    pivotMarker.hidden = !showPivot;
+    if (showPivot) {
+      const point = pivotLocal.clone().applyMatrix4(sceneGroup.matrixWorld).project(getActiveCamera());
+      pivotMarker.hidden = point.z < -1 || point.z > 1;
+      pivotMarker.style.left = ((point.x + 1) / 2 * container.clientWidth) + 'px';
+      pivotMarker.style.top = ((1 - point.y) / 2 * container.clientHeight) + 'px';
+    }
     updateLabels();
   }
   requestAnimationFrame(animate);

@@ -1,11 +1,10 @@
-const CACHE = 'visor-mina-v5';
+const CACHE = 'visor-mina-v6';
 
 const PRECACHE = [
   './',
   './index.html',
   './manifest.json',
   './zones.json',
-  './route-playback.js',
   './utility-layers.js',
   'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
   'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegmentsGeometry.js',

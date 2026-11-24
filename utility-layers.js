@@ -1,8 +1,9 @@
 const LAYERS = [
-  { key: 'bombeo', color: 0x56d8ff },
-  { key: 'electricidad', color: 0xffda58 }
+  { key: 'bombeo', label: 'Bombeo', color: 0xfff34b },
+  { key: 'instalacion-electrica', label: 'Instalación eléctrica', color: 0xff70e8 },
+  { key: 'rutas-acarreo', label: 'Rutas de acarreo', color: 0x4dffb0 }
 ];
-const LINE_WIDTH = 3;
+const LINE_WIDTH = 4;
 
 export function parseUtilityPolylines(text) {
   const data = JSON.parse(text.replace(/^\uFEFF/, ''));
@@ -15,59 +16,63 @@ export function parseUtilityPolylines(text) {
     const vertices = obra?.vertices;
     if (!Array.isArray(vertices) || vertices.length < 2 || vertices.some(point =>
       !Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite)
-    )) {
+    ) || vertices.every(point => point.every((value, axis) => value === vertices[0][axis]))) {
       throw new Error(`Línea ${index + 1}: se requieren al menos dos vértices [X, Y, Z].`);
     }
     return vertices;
   });
 }
 
-export function createUtilityLayers(THREE, sceneGroup, cadToScene) {
+export function createUtilityLayers(THREE, sceneGroup, cadToScene, onVisibilityChange = () => {}) {
   const zoneStates = new WeakMap();
   const wideLines = THREE.LineSegments2 && THREE.LineSegmentsGeometry && THREE.LineMaterial;
   let active = null;
 
-  const layers = LAYERS.map(({ key, color }) => {
+  const status = document.getElementById('network-status');
+  const layers = LAYERS.map(({ key, label, color }) => {
     const group = new THREE.Group();
     const style = { color, transparent: true, depthTest: false, depthWrite: false };
     const material = wideLines
       ? new THREE.LineMaterial({ ...style, linewidth: LINE_WIDTH, alphaToCoverage: true })
       : new THREE.LineBasicMaterial(style);
     const toggle = document.getElementById(`utility-${key}`);
-    const file = document.getElementById(`utility-${key}-file`);
-    const status = document.getElementById(`utility-${key}-status`);
-    const layer = { key, group, material, toggle, file, status };
+    toggle.disabled = true;
+    const layer = { key, label, group, material, toggle };
     sceneGroup.add(group);
-
-    toggle.addEventListener('change', () => {
-      active.states[key].visible = group.visible = toggle.checked;
-    });
-    file.addEventListener('change', async () => {
-      const source = file.files[0];
-      if (!source || !active) return;
-      file.value = '';
+    toggle.addEventListener('click', async () => {
+      if (!active) return;
       const context = active;
       const state = context.states[key];
-      const read = ++state.read;
-      file.disabled = true;
-      status.textContent = 'Leyendo líneas…';
-      try {
-        const polylines = parseUtilityPolylines(await source.text());
-        if (active !== context || read !== state.read) return;
-        Object.assign(state, { polylines, visible: true });
-        render(layer);
-      } catch (error) {
-        if (active === context && read === state.read) {
-          status.textContent = `No se pudo cargar ${source.name}. ${error.message}`;
+      if (!state.polylines) {
+        toggle.disabled = true;
+        toggle.setAttribute('aria-busy', 'true');
+        status.textContent = 'Cargando ' + label.toLowerCase() + '…';
+        try {
+          const response = await fetch(context.zone.path + key + '.json');
+          if (!response.ok) throw new Error(response.status === 404 ? 'Falta ' + key + '.json en la carpeta de esta mina.' : 'HTTP ' + response.status);
+          const polylines = parseUtilityPolylines(await response.text());
+          if (active !== context) return;
+          state.polylines = polylines;
+        } catch (error) {
+          if (active === context) status.textContent = label + '. ' + error.message;
+          return;
+        } finally {
+          if (active === context) {
+            toggle.disabled = false;
+            toggle.removeAttribute('aria-busy');
+          }
         }
-      } finally {
-        if (active === context && read === state.read) file.disabled = false;
       }
+      if (active !== context) return;
+      state.visible = !state.visible;
+      status.textContent = '';
+      render(layer);
+      notify();
     });
     return layer;
   });
 
-  function render({ key, group, material, toggle, file, status }) {
+  function render({ key, group, material, toggle }) {
     for (const line of group.children.slice()) {
       group.remove(line);
       line.geometry.dispose();
@@ -75,10 +80,11 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene) {
 
     const state = active?.states[key];
     const polylines = state?.polylines;
-    file.disabled = !active;
-    toggle.disabled = !polylines;
-    toggle.checked = group.visible = Boolean(polylines && state.visible);
-    status.textContent = polylines ? `${polylines.length} líneas` : '';
+    toggle.disabled = !active;
+    toggle.removeAttribute('aria-busy');
+    group.visible = Boolean(polylines && state.visible);
+    toggle.classList.toggle('active', group.visible);
+    toggle.setAttribute('aria-pressed', String(group.visible));
     if (!polylines) return;
 
     const segments = [];
@@ -105,22 +111,8 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene) {
     group.add(line);
   }
 
-  async function loadConfigured(layer, path, context) {
-    const state = context.states[layer.key];
-    const read = ++state.read;
-    layer.status.textContent = 'Cargando líneas…';
-    try {
-      const response = await fetch(context.zone.path + path);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const polylines = parseUtilityPolylines(await response.text());
-      if (active !== context || read !== state.read) return;
-      state.polylines = polylines;
-      render(layer);
-    } catch (error) {
-      if (active === context && read === state.read) {
-        layer.status.textContent = `No se pudo cargar ${path}. ${error.message}`;
-      }
-    }
+  function notify() {
+    onVisibilityChange(layers.some(({ group }) => group.visible));
   }
 
   return {
@@ -133,17 +125,13 @@ export function createUtilityLayers(THREE, sceneGroup, cadToScene) {
     setZone(zone, origin) {
       if (zone && !zoneStates.has(zone)) {
         zoneStates.set(zone, Object.fromEntries(LAYERS.map(({ key }) =>
-          [key, { polylines: null, visible: false, read: 0 }]
+          [key, { polylines: null, visible: false }]
         )));
       }
       active = zone ? { zone, origin, states: zoneStates.get(zone) } : null;
-      layers.forEach(layer => {
-        render(layer);
-        const path = zone?.servicios?.[layer.key];
-        if (typeof path === 'string' && path && !active.states[layer.key].polylines) {
-          loadConfigured(layer, path, active);
-        }
-      });
+      status.textContent = '';
+      layers.forEach(render);
+      notify();
     }
   };
 }
